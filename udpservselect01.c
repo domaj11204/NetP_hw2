@@ -3,8 +3,12 @@
 #include <signal.h>
 #include "OOXX2.c"
 #include <string.h>
+#include <setjmp.h>
 #define MAXNUM 10
-
+struct sockaddr_in all_cliaddr[MAXNUM];
+char user_online[MAXNUM][3][20];//no,ip,room    
+int all_alive[MAXNUM];
+int alive_count=0;
 void show_all_user(char PASSWORD[][2][10]){
     for(int i = 0 ; i < MAXNUM ; i++){
         printf("%s,%s\n",PASSWORD[i][0],PASSWORD[i][1]);
@@ -46,8 +50,43 @@ void all_show(char user_online[][3][20],struct sockaddr all_cliaddr[],int udpfd)
         }
     }
 }
+
+int want_table(int who[][3]){
+    for(int i = 0 ; i < 200 ; i++){
+        if(who[i][0] == -1){
+            return i;
+        }
+    }
+    return -1;
+}
+
+void sigalrm_fn(int sig)
+
+{
+    check();
+    printf("checking......\n");
+}
+
+void check(){
+    char check_mesg[10] = "=alive=";
+    for(int i = 0 ; i < MAXNUM ; i++){
+        if(strcmp(user_online[i][0],"enable") != 0){
+            Sendto(3, check_mesg, strlen(check_mesg), 0, (SA *) &all_cliaddr[i], sizeof(all_cliaddr[i]));
+            all_alive[i]--;
+            if(all_alive[i] == 0){
+                sprintf(user_online[i][0],"enable");
+                all_show(user_online,all_cliaddr,3);
+                printf("%d time out\n",i);
+            }
+        }
+    }
+    alarm(5);
+}
+
 int main(int argc, char **argv)
 {
+    signal(SIGALRM, sigalrm_fn);
+    alarm(5);
 	int					listenfd, connfd, udpfd, nready, maxfdp1;
 	char				mesg[MAXLINE],mesg_out[MAXLINE] = "enn";
 	pid_t				childpid;
@@ -59,9 +98,12 @@ int main(int argc, char **argv)
 	void				sig_chld(int);
     int all_table[200][3][3];
     int who[200][3];//0 = 換誰 1=1的ID  2 = 2的ID
+    for(int i = 0 ; i < 200 ; i++){
+        who[i][0] = -1;
+    }
     int num_user_online = 0;
     int num_played_table = 0;
-    struct sockaddr_in all_cliaddr[MAXNUM];
+   
     char PASSWORD[MAXNUM][2][10]=
     {
         {"aa","aaa"},
@@ -74,7 +116,7 @@ int main(int argc, char **argv)
         {"hh","hhh"},
         {"ii","iii"}
     };
-    char user_online[MAXNUM][3][20];//no,ip,room    
+
     for(int i = 0 ; i < MAXNUM ; i++){
         sprintf(user_online[i][0],"enable");
     }
@@ -97,6 +139,7 @@ int main(int argc, char **argv)
     table_initialization(all_table[0]);
 	for ( ; ; ) {
 		//FD_SET(listenfd, &rset);
+        FD_SET(0,&rset);
 		FD_SET(udpfd, &rset);
         printf("udpfd:%d\n",udpfd);
 		if ( (nready = select(maxfdp1, &rset, NULL, NULL, NULL)) < 0) {
@@ -106,17 +149,24 @@ int main(int argc, char **argv)
 				err_sys("select error");
 		}
 
-		//if (FD_ISSET(listenfd, &rset)) {
-		//	len = sizeof(cliaddr);
-		//	connfd = Accept(listenfd, (SA *) &cliaddr, &len);
-          //  printf("lol\n");
-			//if ( (childpid = Fork()) == 0) {	/* child process */
-			//	Close(listenfd);	/* close listening socket */
-			//	str_echo(connfd);	/* process the request */
-			//	exit(0);
-			//}
-			//Close(connfd);			/* parent closes connected socket */
-		//}
+		if (FD_ISSET(0, &rset)) {
+            char FUN[10];
+            scanf(" %s",&FUN);
+            if(strcmp(FUN,"end") == 0){
+                char end_mesg[10] = "=end=";
+                for(int i = 0 ; i < MAXNUM ; i++){
+                    if(strcmp(user_online[i][0],"enable") != 0){
+                        int ID = i;
+                        Sendto(udpfd, end_mesg, strlen(end_mesg), 0, (SA *) &all_cliaddr[ID], sizeof(all_cliaddr[ID]));
+                    }
+                }
+                return 0;
+            }
+            if(strcmp(FUN,"refresh") == 0){
+                check();
+            }
+            
+        }
 
 		if (FD_ISSET(udpfd, &rset)) {
 			len = sizeof(cliaddr);
@@ -159,6 +209,7 @@ int main(int argc, char **argv)
                             all_cliaddr[ID] = cliaddr;
                             Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &cliaddr, sizeof(cliaddr));
                             login = 1;
+                            all_alive[ID] = 2;
                             all_show(user_online,all_cliaddr,udpfd);
                         }
                     }
@@ -197,13 +248,22 @@ int main(int argc, char **argv)
                 int invite_id = atoi(mesg+8);
                 int now_id = find_by_ip(IP_PORT,user_online);
                 char invite_mesg[MAXLINE];
-                sprintf(invite_mesg,"=invitefrom=%d",now_id);
-                Sendto(udpfd, invite_mesg, strlen(invite_mesg), 0, (SA *) &all_cliaddr[invite_id], sizeof(all_cliaddr[invite_id]));
+                if(strcmp(user_online[invite_id][0],"enable") == 0 ||
+                    user_online[invite_id][2][0]!='-'||
+                    invite_id == now_id){
+                    char invite_error[20] = "=invite_error=";
+                    Sendto(udpfd, invite_error, strlen(invite_error), 0, (SA *) &all_cliaddr[now_id], sizeof(all_cliaddr[now_id]));
+                }
+                else
+                {
+                     sprintf(invite_mesg,"=invitefrom=%d",now_id);
+                     Sendto(udpfd, invite_mesg, strlen(invite_mesg), 0, (SA *) &all_cliaddr[invite_id], sizeof(all_cliaddr[invite_id]));
+                }
             }
             else if(strncmp(mesg,"=acceptinvite=",14) == 0){
                 int invite_id =find_by_ip(IP_PORT,user_online) ;
                 int now_id = atoi(mesg+14);    
-                int room = num_played_table;
+                int room = want_table(who);
                 //printf("==invite==\n%d invite %d\n",now_id,invite_id);
                 table_initialization(all_table[room]);
                 sprintf(user_online[now_id][2],"%d",room);
@@ -211,7 +271,6 @@ int main(int argc, char **argv)
                 sprintf(user_online[invite_id][2],"%d",room);
                 who[room][2]  = invite_id;
                 who[room][0] = 1;
-                num_played_table ++;
                 sprintf(mesg_out,"=invite_ok=");
                 Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[now_id], sizeof(all_cliaddr[now_id]));
                 char tmp[200];
@@ -219,6 +278,12 @@ int main(int argc, char **argv)
                 sprintf(mesg_out,"=wait=%s",tmp);
                 Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[invite_id], sizeof(all_cliaddr[invite_id]));
                 all_show(user_online,all_cliaddr,udpfd);
+            }
+            else if(strncmp(mesg,"=refuse=",8) == 0){
+                int invite_id =find_by_ip(IP_PORT,user_online) ;
+                int now_id = atoi(mesg+8);    
+                sprintf(mesg_out,"=refuse=");
+                Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[now_id], sizeof(all_cliaddr[now_id]));
             }
             else if(strncmp(mesg,"=play=",6) == 0){
                 int ID = find_by_ip(IP_PORT,user_online);
@@ -241,28 +306,37 @@ int main(int argc, char **argv)
                 int room = atoi(user_online[ID][2]);
                 int xy = atoi(mesg+5);
                 int x = xy/10, y = xy%10;
-                char tmp[200];
+                char table[200];
                 int next = (who[room][0]==1)?2:1;
                 int now_id = who[who[room][0]];
                 int next_id = who[room][next];
-                int ans = OOXX(who[room][0],all_table[room],x,y,tmp);
+                int ans = OOXX(who[room][0],all_table[room],x,y,table);
                 //show_table(all_table[0]);
                 //printf("mesg_out:\n%s",mesg_out);
                 printf("ans:%d\n",ans);
                 who[room][0] = next;
-                if(ans != 0){
+                if(ans != 0 && ans!= -1){
                     int winner = who[room][ans];
                     int loser = (ans==1)?2:1;
-                    sprintf(mesg_out,"=win=");
+                    sprintf(mesg_out,"=win=%s",table);
                     Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &cliaddr, sizeof(cliaddr));
-                    sprintf(mesg_out,"=lose=");
-                    Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[who[room][loser]], sizeof(all_cliaddr[who[room][loser]]));                
+                    memset(mesg_out,0,MAXLINE);
+                    sprintf(mesg_out,"=lose=%s",table);
+                    Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[next_id], sizeof(all_cliaddr[next_id]));                       
+                }
+                else if(ans == -1)
+                {
+                    sprintf(mesg_out,"=tie=%s",table);
+                    Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &cliaddr, sizeof(cliaddr));
+                    Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[next_id], sizeof(all_cliaddr[next_id]));                    
                 }
                 else
                 {
-                    sprintf(mesg_out,"=wait=%s",tmp);
+                    memset(mesg_out,0,MAXLINE);
+                    sprintf(mesg_out,"=wait=%s",table);
                     Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &cliaddr, sizeof(cliaddr));
-                    sprintf(mesg_out,"your_turn%s",tmp);
+                    memset(mesg_out,0,MAXLINE);
+                    sprintf(mesg_out,"your_turn%s",table);
                     Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[next_id], sizeof(all_cliaddr[next_id])); 
                 }
                 
@@ -273,12 +347,45 @@ int main(int argc, char **argv)
                 sprintf(user_online[ID][0],"enable");
                 all_show(user_online,all_cliaddr,udpfd);
             }
-            
+            else if(strncmp(mesg,"=alive=",7) == 0){
+                int ID = find_by_ip(IP_PORT,user_online);
+                all_alive[ID] = 2;
+            }
+            else if(strncmp(mesg,"=free=",6) == 0){
+                int ID = find_by_ip(IP_PORT,user_online);
+                int room = atoi(user_online[ID][2]);
+                who[room][0] = -1;
+                sprintf(user_online[ID][2],"-1"); 
+                int ID1 = who[room][1];
+                int ID2 = who[room][2];
+                if(user_online[ID1][2][0] == '-' && user_online[ID2][2][0] == '-'){
+                    who[room][0] = -1;
+                }
+                all_show(user_online,all_cliaddr,udpfd);
+            }
+            else if(strncmp(mesg,"=ff=",4) == 0){
+                int ID = find_by_ip(IP_PORT,user_online);
+                int room = atoi(user_online[ID][2]);
+                int win_ID,lose_ID = ID;
+                if(who[room][1] == ID){
+                    win_ID = who[room][2];
+                }
+                else
+                {
+                    win_ID = who[room][1];
+                }
+                sprintf(mesg_out,"=win=對方投降了\n");
+                Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[win_ID], sizeof(all_cliaddr[win_ID]));
+                memset(mesg_out,0,MAXLINE);
+                sprintf(mesg_out,"=lose=投降成功\n");
+                Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[ID], sizeof(all_cliaddr[ID]));
+            }
             else{
                 int xy = atoi(mesg);
                 int x = xy/10;
                 int y = xy%10;
             }
+            memset(mesg_out,0,MAXLINE);
         }
 	}
 }

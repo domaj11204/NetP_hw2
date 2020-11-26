@@ -95,6 +95,12 @@ int OOXX(int chracter, int table[][3], int x, int y,char mesg_out[]){//return 0 
             //printf("%c WIN\n",Q[q_win]);
             return q_win;
         }
+        for(int i = 0 ; i < 3 ; i++){
+            for(int j = 0 ; j < 3; j++){
+                if(table[i][j] == 0)
+                    return 0;
+            }
+        }
     //}
-    return 0;
+    return -1;
 }
