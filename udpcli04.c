@@ -29,7 +29,7 @@ main(int argc, char **argv)
 
 	bzero(&servaddr, sizeof(servaddr));
 	servaddr.sin_family = AF_INET;
-	servaddr.sin_port = htons(SERV_PORT);
+	servaddr.sin_port = htons(SERV_PORT+1);
 	Inet_pton(AF_INET, argv[1], &servaddr.sin_addr);
 
 	sockfd = Socket(AF_INET, SOCK_DGRAM, 0);
@@ -73,6 +73,7 @@ main(int argc, char **argv)
 		FD_ZERO(&rset);
 		FD_SET(0,&rset);
 		playing:FD_SET(sockfd,&rset);
+		memset(recvline,0,MAXLINE);
 		//printf("wainting I/O\n");
 		int result = select(sockfd+1,&rset,NULL,NULL,NULL);
 		//printf("result:%d\n",result);
@@ -88,7 +89,7 @@ main(int argc, char **argv)
 				char Table[200];
 				sprintf(Table,"%s",recvline+9);
 				printf("%s",Table);
-				printf("(你是%c) 要下哪呢～：\n輸入\"x\"投降\n",ch);
+				printf("(你是%c) 要下哪呢～：\n輸入\"3\"投降\n",ch);
 				int xy;
 				//fflush(stdin);
 			}
@@ -97,7 +98,7 @@ main(int argc, char **argv)
 				char Table[200];
 				sprintf(Table,"%s",recvline+6);
 				printf("%s",Table);
-				printf("輪到對方～\n輸入\"x\"投降\n");
+				printf("輪到對方～\n輸入\"3\"投降\n");
 				state = 5;
 			}
 			if(strncmp(recvline,"=win=",5) == 0){
@@ -106,10 +107,19 @@ main(int argc, char **argv)
 				printf("你贏啦！！(Y)\n");
 				state = 3;
 			}
+			if(strncmp(recvline,"=win2=",6) == 0){
+				printf("對方投降了(Y)\n");
+				state = 3;
+			}
 			if(strncmp(recvline,"=lose=",6) == 0){
 				char Table[200];
-				sprintf(Table,"%s\0",recvline+6);
+				sprintf(Table,"%s",recvline+6);
 				printf("%s你輸啦!!(Y)\n",Table);
+				state = 3;
+			}
+			if(strncmp(recvline,"=lose2=",7) == 0){
+				char Table[200];
+				printf("投降成功\n你輸啦!!(Y)\n");
 				state = 3;
 			}
 			if(strncmp(recvline,"=tie=",5) == 0){
@@ -118,17 +128,14 @@ main(int argc, char **argv)
 				printf("%s平手gg(Y)\n",Table);
 				state = 3;
 			}
-			if(strncmp(recvline,"=new_show=",10) == 0){
-				if(state == 3){
-					continue;
-				}
+			if(strncmp(recvline,"=new_show=",10) == 0 && state == -1){
 				printf("\033[2J\n\033[1;1H登入成功\n線上列表：\nID  |  Name  |       IP        | room\n");
 				printf("%s",recvline+10);
 				memset(recvline,0,MAXLINE);
 				printf("等待指令中.......0顯示、1邀請、2登出\n");
 			}
 			if(strncmp(recvline,"=alive=",7) == 0){
-				char alive_mesg[10] = "=alive=";
+				char alive_mesg[10] = "=yea=";
 				Sendto(sockfd,alive_mesg,strlen(alive_mesg),0,(SA*) &servaddr, sizeof(servaddr));
 				goto logined;
 			}
@@ -141,12 +148,13 @@ main(int argc, char **argv)
 				printf("對方拒絕啦\n");
 				sleep(1);
 				want_show();
+				state = -1;
 			}
 			if(strcmp(recvline,"=invite_ok=") == 0){
-					printf("連線成功\n");
-					ch = 'O';
-					sprintf(tmp,"=play=");
-					Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));	
+				printf("連線成功\n");
+				ch = 'O';
+				sprintf(tmp,"=play=");
+				Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));	
 			}
 			if(strcmp(recvline,"=alive=") == 0)
 			{
@@ -155,9 +163,9 @@ main(int argc, char **argv)
 			}
 			if(strcmp(recvline,"=invite_error=") == 0)
 			{
-				char alive_mesg[10] = "=alive=";
 				want_show();
 				printf("邀請錯誤\n");
+				state = -1;
 			}
 		}
 		if(FD_ISSET(0,&rset)){
@@ -184,8 +192,14 @@ main(int argc, char **argv)
 			else if(state == 2){
 				int xy;
 				scanf("%d",&xy);
-				sprintf(tmp,"=set=%d",xy);
-				Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));
+				if(xy == 3){
+					char tmp[10]="=ff=";
+					Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));
+				}
+				else{
+					sprintf(tmp,"=set=%d",xy);
+					Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));
+				}
 				state = -1;
 			}
 			else if(state == 3)
@@ -195,7 +209,7 @@ main(int argc, char **argv)
 				if(tmpc == 'Y'){
 					char tmp[10] = "=free=";
 					Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));
-					want_show();
+					//want_show();
 					state = -1;
 				}
 			}
@@ -206,9 +220,18 @@ main(int argc, char **argv)
 				char tmp[20];
 				sprintf(tmp,"=invite=%d",invite_id);
 				Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));
+				state = 10;
+			}
+			else if( state == 5){
+				int xy;
+				scanf("%d",&xy);
+				if(xy == 3){
+					char tmp[10]="=ff=";
+					Sendto(sockfd,tmp,strlen(tmp),0,(SA*) &servaddr, sizeof(servaddr));
+				}
 				state = -1;
 			}
-			else{
+			else if( state == -1){
 				int fun_no;
 				scanf("%d",&fun_no);
 				if(fun_no == 0){

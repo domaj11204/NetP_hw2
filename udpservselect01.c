@@ -11,12 +11,12 @@ int all_alive[MAXNUM];
 int alive_count=0;
 void show_all_user(char PASSWORD[][2][10]){
     for(int i = 0 ; i < MAXNUM ; i++){
-        printf("%s,%s\n",PASSWORD[i][0],PASSWORD[i][1]);
+        //printf("%s,%s\n",PASSWORD[i][0],PASSWORD[i][1]);
     }
 }
 
 int find_by_ip(char ip[],char user_online[][3][20]){
-    printf("==find_by_ip==\nip:%s\n",ip);
+    //printf("==find_by_ip==\nip:%s\n",ip);
     for(int i = 0 ; i < MAXNUM ; i++){
         if(strcmp(ip,user_online[i][1]) == 0){
             return i;
@@ -45,7 +45,7 @@ void all_show(char user_online[][3][20],struct sockaddr all_cliaddr[],int udpfd)
                     strcat(mesg_out,tmp);   
                 }
             }
-            printf("%s\n",mesg_out);
+            printf("%10s\n",mesg_out);
             Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[ID], sizeof(all_cliaddr[ID]));
         }
     }
@@ -67,6 +67,17 @@ void sigalrm_fn(int sig)
     printf("checking......\n");
 }
 
+void sig_c(int sig)
+{
+    printf("伺服器關閉中\n");
+    char end[10] = "=end=";
+    for(int i = 0 ; i < MAXNUM ; i++){
+        if(strcmp(user_online[i][0],"enable") != 0){
+            Sendto(3, end, strlen(end), 0, (SA *) &all_cliaddr[i], sizeof(all_cliaddr[i]));
+        }
+    }
+    exit(0);
+}
 void check(){
     char check_mesg[10] = "=alive=";
     for(int i = 0 ; i < MAXNUM ; i++){
@@ -85,7 +96,9 @@ void check(){
 
 int main(int argc, char **argv)
 {
+    
     signal(SIGALRM, sigalrm_fn);
+    signal(SIGINT,sig_c);
     alarm(5);
 	int					listenfd, connfd, udpfd, nready, maxfdp1;
 	char				mesg[MAXLINE],mesg_out[MAXLINE] = "enn";
@@ -126,7 +139,7 @@ int main(int argc, char **argv)
 	bzero(&servaddr, sizeof(servaddr));
 	servaddr.sin_family      = AF_INET;
 	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	servaddr.sin_port        = htons(SERV_PORT);
+	servaddr.sin_port        = htons(SERV_PORT+1);
 
 	Bind(udpfd, (SA *) &servaddr, sizeof(servaddr));
 /* end udpservselect01 */
@@ -137,11 +150,12 @@ int main(int argc, char **argv)
 	FD_ZERO(&rset);
 	maxfdp1 = max(listenfd, udpfd) + 1;
     table_initialization(all_table[0]);
+    printf("伺服器已就緒\n");
 	for ( ; ; ) {
 		//FD_SET(listenfd, &rset);
         FD_SET(0,&rset);
 		FD_SET(udpfd, &rset);
-        printf("udpfd:%d\n",udpfd);
+        //printf("udpfd:%d\n",udpfd);
 		if ( (nready = select(maxfdp1, &rset, NULL, NULL, NULL)) < 0) {
 			if (errno == EINTR)
 				continue;		/* back to for() */
@@ -160,7 +174,7 @@ int main(int argc, char **argv)
                         Sendto(udpfd, end_mesg, strlen(end_mesg), 0, (SA *) &all_cliaddr[ID], sizeof(all_cliaddr[ID]));
                     }
                 }
-                return 0;
+                exit(0);
             }
             if(strcmp(FUN,"refresh") == 0){
                 check();
@@ -177,8 +191,8 @@ int main(int argc, char **argv)
             //printf("%s:%d------>serv     \n",ipstr,port);
             char IP_PORT[20];
             sprintf(IP_PORT,"%s:%d",inet_ntoa(cliaddr.sin_addr),htons(cliaddr.sin_port));
-            printf("---------------\nIP:%s\n",IP_PORT);
-            printf("mesg:%s\n",mesg);
+            //printf("---------------\nIP:%s\n",IP_PORT);
+            printf("mesg:%10s\n",mesg);
             memset(mesg_out,'\0',MAXLINE);
             if(strncmp(mesg,"=login=",7) == 0){
                 char* tmp = strtok(mesg,"_");
@@ -186,8 +200,8 @@ int main(int argc, char **argv)
                 sprintf(acc,"%s",tmp+7);
                 tmp = strtok(NULL,"_");
                 sprintf(pass,"%s",tmp);
-                printf("acc:%s\n",acc);
-                printf("pass:%s\n",pass);
+                //printf("acc:%s\n",acc);
+                //printf("pass:%s\n",pass);
                 int login = 0;
                 for(int i = 0 ; i < MAXNUM ; i ++){
                     if(strcmp(acc,PASSWORD[i][0]) == 0){
@@ -223,7 +237,7 @@ int main(int argc, char **argv)
             }
             else if(strncmp(mesg,"=show=",6) == 0){
                 int ID = find_by_ip(IP_PORT,user_online);
-                printf("==show==\n");
+                //printf("==show==\n");
                 mesg_out[0] = '\0';
                 for(int i = 0 ; i < MAXNUM ; i++){
                     if(strcmp(user_online[i][0],"enable") == 0){
@@ -241,7 +255,7 @@ int main(int argc, char **argv)
                         strcat(mesg_out,tmp);   
                     }
                 }
-                printf("%s\n",mesg_out);
+                printf("%10s\n",mesg_out);
                 Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &cliaddr, sizeof(cliaddr));
             }
             else if(strncmp(mesg,"=invite=",8) == 0){
@@ -347,9 +361,14 @@ int main(int argc, char **argv)
                 sprintf(user_online[ID][0],"enable");
                 all_show(user_online,all_cliaddr,udpfd);
             }
-            else if(strncmp(mesg,"=alive=",7) == 0){
+            else if(strncmp(mesg,"=yea=",5) == 0){
                 int ID = find_by_ip(IP_PORT,user_online);
                 all_alive[ID] = 2;
+            }
+            else if(strncmp(mesg,"=alive=",7) == 0){
+                int ID = find_by_ip(IP_PORT,user_online);
+                sprintf(mesg_out,"=yea=");
+                Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[ID], sizeof(all_cliaddr[ID])); 
             }
             else if(strncmp(mesg,"=free=",6) == 0){
                 int ID = find_by_ip(IP_PORT,user_online);
@@ -374,10 +393,10 @@ int main(int argc, char **argv)
                 {
                     win_ID = who[room][1];
                 }
-                sprintf(mesg_out,"=win=對方投降了\n");
+                sprintf(mesg_out,"=win2=對方投降了\n");
                 Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[win_ID], sizeof(all_cliaddr[win_ID]));
                 memset(mesg_out,0,MAXLINE);
-                sprintf(mesg_out,"=lose=投降成功\n");
+                sprintf(mesg_out,"=lose2=投降成功\n");
                 Sendto(udpfd, mesg_out, strlen(mesg_out), 0, (SA *) &all_cliaddr[ID], sizeof(all_cliaddr[ID]));
             }
             else{
